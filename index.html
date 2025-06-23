@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ReelsWatch - JSON Version</title>
+  <title>Reels Projection</title>
   <style>
     body {
       margin: 0;
@@ -100,6 +100,20 @@
     let earning = 0;
     let reelsData = [];
 
+    // Load earning from LocalStorage
+    function loadEarningFromStorage() {
+      const saved = localStorage.getItem("reels_earning");
+      if (saved) {
+        earning = parseFloat(saved);
+        earningsText.textContent = "$" + earning.toFixed(3);
+      }
+    }
+
+    // Save earning to LocalStorage
+    function saveEarningToStorage() {
+      localStorage.setItem("reels_earning", earning.toFixed(3));
+    }
+
     async function loadJSON() {
       try {
         const res = await fetch("reels.json");
@@ -133,8 +147,9 @@
       video.addEventListener("ended", () => {
         if (!watched.has(reel.id)) {
           watched.add(reel.id);
-          earning += 0.002;
+          earning += 0.002; // slow earning
           earningsText.textContent = "$" + earning.toFixed(3);
+          saveEarningToStorage();
 
           const item = document.createElement("div");
           item.className = "history-item";
@@ -148,6 +163,7 @@
       return div;
     }
 
+    loadEarningFromStorage();
     loadJSON();
   </script>
 </body>
