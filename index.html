@@ -10,7 +10,7 @@
       background: #236622;
       color: white;
       font-family: 'Segoe UI', sans-serif;
-      overflow-x: hidden;
+      overflow: hidden;
     }
 
     header {
@@ -25,21 +25,14 @@
       box-shadow: 0 2px 10px #0005;
     }
 
-    .container {
-      scroll-snap-type: y mandatory;
-      overflow-y: scroll;
-      height: 100vh;
-      padding-top: 50px;
-    }
-
-    .reel {
+    .video-wrapper {
       width: 100vw;
       height: 100vh;
-      scroll-snap-align: start;
       display: flex;
       align-items: center;
       justify-content: center;
       position: relative;
+      padding-top: 40px;
     }
 
     video {
@@ -54,9 +47,36 @@
       left: 20px;
       color: white;
       font-size: 1.1em;
-      background: rgba(0,0,0,0.4);
+      background: rgba(0, 0, 0, 0.5);
       padding: 5px 10px;
       border-radius: 5px;
+    }
+
+    .center-controls {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      gap: 15px;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .center-controls.show {
+      opacity: 1;
+    }
+
+    .custom-btn {
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      border: none;
+      padding: 12px 18px;
+      font-size: 1em;
+      border-radius: 10px;
+      cursor: pointer;
+      backdrop-filter: blur(5px);
     }
 
     #history {
@@ -81,10 +101,16 @@
 </head>
 <body>
   <header>
-    Total Earned: <span id="earnings">$0.000</span>
+    Total Earned: <span id="earnings">$0.000</span> |
+    Time Left: <span id="timeLeft">0s</span>
   </header>
 
-  <div class="container" id="reels-container"></div>
+  <div class="video-wrapper" id="videoWrapper"></div>
+
+  <div class="center-controls" id="controlButtons">
+    <button id="playPauseBtn" class="custom-btn">Pause</button>
+    <button id="muteBtn" class="custom-btn">Unmute</button>
+  </div>
 
   <div id="history">
     <h3>Watch History</h3>
@@ -92,15 +118,22 @@
   </div>
 
   <script>
-    const container = document.getElementById("reels-container");
+    const videoWrapper = document.getElementById("videoWrapper");
     const historyList = document.getElementById("history-list");
     const earningsText = document.getElementById("earnings");
+    const timeLeftText = document.getElementById("timeLeft");
+    const playPauseBtn = document.getElementById("playPauseBtn");
+    const muteBtn = document.getElementById("muteBtn");
+    const controlButtons = document.getElementById("controlButtons");
 
-    let watched = new Set();
-    let earning = 0;
-    let reelsData = [];
+    let watched = new Set(JSON.parse(localStorage.getItem("watched_ids") || "[]"));
+let earning = 0;
+let currentIndex = 0;
+let reelsData = [];
+let currentVideo;
+let timeInterval;
+let hideTimeout;
 
-    // Load earning from LocalStorage
     function loadEarningFromStorage() {
       const saved = localStorage.getItem("reels_earning");
       if (saved) {
@@ -109,62 +142,130 @@
       }
     }
 
-    // Save earning to LocalStorage
     function saveEarningToStorage() {
       localStorage.setItem("reels_earning", earning.toFixed(3));
     }
 
-    async function loadJSON() {
-      try {
-        const res = await fetch("reels.json");
-        reelsData = await res.json();
-        reelsData.forEach(reel => {
-          const div = createReel(reel);
-          container.appendChild(div);
-        });
-      } catch (error) {
-        console.error("JSON Load Error:", error);
-        alert("Reels JSON file load nahi hui!");
-      }
-    }
-
-    function createReel(reel) {
-      const div = document.createElement("div");
-      div.className = "reel";
-
-      const video = document.createElement("video");
-      video.src = reel.video;
-      video.setAttribute("playsinline", true);
-      video.setAttribute("muted", true);
-      video.setAttribute("controls", true);
-      video.setAttribute("autoplay", true);
-      video.loop = false;
-
-      const overlay = document.createElement("div");
-      overlay.className = "overlay";
-      overlay.innerText = `Reel ID: ${reel.id}`;
-
-      video.addEventListener("ended", () => {
-        if (!watched.has(reel.id)) {
-          watched.add(reel.id);
-          earning += 0.002; // slow earning
-          earningsText.textContent = "$" + earning.toFixed(3);
-          saveEarningToStorage();
-
-          const item = document.createElement("div");
-          item.className = "history-item";
-          item.textContent = `✔ Reel ${reel.id} Watched`;
-          historyList.appendChild(item);
+    function updateTimeLeft(duration, video) {
+      clearInterval(timeInterval);
+      timeInterval = setInterval(() => {
+        if (video.ended) {
+          clearInterval(timeInterval);
+          timeLeftText.textContent = "0s";
+        } else {
+          const remaining = Math.ceil(duration - video.currentTime);
+          timeLeftText.textContent = remaining + "s";
         }
-      });
-
-      div.appendChild(video);
-      div.appendChild(overlay);
-      return div;
+      }, 1000);
     }
+
+    function toggleControls() {
+      controlButtons.classList.add("show");
+      clearTimeout(hideTimeout);
+      hideTimeout = setTimeout(() => {
+        controlButtons.classList.remove("show");
+      }, 2500);
+    }
+
+    function loadReel(index) {
+  // Skip watched reels
+  while (index < reelsData.length && watched.has(reelsData[index].id)) {
+    index++;
+  }
+
+  if (index >= reelsData.length) {
+    videoWrapper.innerHTML = "<h2 style='text-align:center;'>🎉 All reels watched!</h2>";
+    timeLeftText.textContent = "0s";
+    return;
+  }
+
+  currentIndex = index;
+  const reel = reelsData[currentIndex];
+  videoWrapper.innerHTML = "";
+
+  const video = document.createElement("video");
+  video.src = reel.video;
+  video.setAttribute("playsinline", true);
+  video.setAttribute("muted", true);
+  video.setAttribute("autoplay", true);
+  video.removeAttribute("controls");
+
+  currentVideo = video;
+
+  const overlay = document.createElement("div");
+  overlay.className = "overlay";
+  overlay.innerText = `Reel ID: ${reel.id}`;
+
+  video.addEventListener("loadedmetadata", () => {
+    video.play();
+    updateTimeLeft(video.duration, video);
+    playPauseBtn.innerText = "Pause";
+    muteBtn.innerText = "Unmute";
+  });
+
+  video.addEventListener("error", () => {
+    console.warn("Broken video skipped:", reel.video);
+    loadReel(currentIndex + 1);
+  });
+
+  video.addEventListener("ended", () => {
+    clearInterval(timeInterval);
+    if (!watched.has(reel.id)) {
+      watched.add(reel.id);
+      saveWatchedToStorage();
+
+      earning += 0.002;
+      earningsText.textContent = "$" + earning.toFixed(3);
+      saveEarningToStorage();
+
+      const item = document.createElement("div");
+      item.className = "history-item";
+      item.textContent = `✔ Reel ${reel.id} Watched`;
+      historyList.appendChild(item);
+    }
+    loadReel(currentIndex + 1);
+  });
+
+  video.addEventListener("click", () => toggleControls());
+
+  videoWrapper.appendChild(video);
+  videoWrapper.appendChild(overlay);
+}
+
+    playPauseBtn.addEventListener("click", () => {
+      if (!currentVideo) return;
+      if (currentVideo.paused) {
+        currentVideo.play();
+        playPauseBtn.innerText = "Pause";
+      } else {
+        currentVideo.pause();
+        playPauseBtn.innerText = "Play";
+      }
+    });
+
+    muteBtn.addEventListener("click", () => {
+      if (!currentVideo) return;
+      currentVideo.muted = !currentVideo.muted;
+      muteBtn.innerText = currentVideo.muted ? "Unmute" : "Mute";
+    });
+
+    async function loadJSON() {
+  try {
+    const res = await fetch("https://raw.githubusercontent.com/uzair909-store/reelsprojection/refs/heads/main/reels.json");
+    reelsData = await res.json();
+    loadReel(currentIndex);
+  } catch (error) {
+    console.error("JSON Load Error:", error);
+    alert("Reels JSON file load nahi hui!");
+  }
+}
 
     loadEarningFromStorage();
     loadJSON();
+  
+function saveWatchedToStorage() {
+  localStorage.setItem("watched_ids", JSON.stringify([...watched]));
+} 
   </script>
 </body>
 </html>
